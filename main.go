@@ -18,8 +18,11 @@ func (app app) Init() tea.Cmd {
 
 var appStyle = lipgloss.NewStyle().Padding(1, 2)
 
+type searchResultMsg []list.Item
+
 func (app app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -27,22 +30,29 @@ func (app app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return app, tea.Quit
 		default:
-			if len(msg.Runes) == 1 && msg.Type == tea.KeyRunes {
-				return app, app.handleSearch()
+			if msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace || msg.Type == tea.KeySpace {
+				app.searchInput, cmd = app.searchInput.Update(msg)
+				cmds = append(cmds, cmd)
+
+				cmd = app.handleSearch()
+				cmds = append(cmds, cmd)
+
+				return app, tea.Batch(cmds...)
 			}
 		}
 	case tea.WindowSizeMsg:
 		h, v := appStyle.GetFrameSize()
 		app.resultsList.SetSize(msg.Width-h, msg.Height-v)
+		return app, nil
+
+	case searchResultMsg:
+		cmd := app.resultsList.SetItems(msg)
+		return app, cmd
 	}
 
 	// Update the components
-	updateSearchInput, searchCmd := app.searchInput.Update(msg)
-	app.searchInput = updateSearchInput
-	cmds = append(cmds, searchCmd)
-	updatedResultsList, listCmd := app.resultsList.Update(msg)
-	app.resultsList = updatedResultsList
-	cmds = append(cmds, listCmd)
+	app.resultsList, cmd = app.resultsList.Update(msg)
+	cmds = append(cmds, cmd)
 
 	return app, tea.Batch(cmds...)
 }
@@ -50,15 +60,14 @@ func (app app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (app app) handleSearch() tea.Cmd {
 	return tea.Tick(time.Millisecond*300, func(t time.Time) tea.Msg {
 		app.state.ApiState.Status = models.Loading
-		characters, _ := models.FetchCharacters(app.searchInput.Value())
-		return app.resultsList.SetItems(characters)
-		// if err != nil {
-		// 	app.state.ApiState.Status = models.Error
-		// 	app.state.ApiState.Error = err
-		// 	return err
-		// } else {
-		// 	return characters
-		// }
+		characters, err := models.FetchCharacters(app.searchInput.Value())
+		if err != nil {
+			app.state.ApiState.Status = models.Error
+			app.state.ApiState.Error = err
+			return err
+		}
+
+		return searchResultMsg(characters)
 	})
 }
 
