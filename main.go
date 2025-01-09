@@ -3,80 +3,62 @@ package main
 import (
 	"fmt"
 	"os"
-	"time"
 	"tui/test/models"
+	"tui/test/views"
 
-	"github.com/charmbracelet/bubbles/list"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/Broderick-Westrope/charmutils"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
+
+type app struct {
+	step          models.Step
+	searchModel   views.SearchModel
+	downloadModel views.DownloadModel
+}
 
 func (app app) Init() tea.Cmd {
 	return nil
 }
 
-var appStyle = lipgloss.NewStyle().Padding(1, 2)
-
-type searchResultMsg []list.Item
-
 func (app app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
 			return app, tea.Quit
-		default:
-			if msg.Type == tea.KeyRunes || msg.Type == tea.KeyBackspace || msg.Type == tea.KeySpace {
-				app.searchInput, cmd = app.searchInput.Update(msg)
-				cmds = append(cmds, cmd)
-
-				cmd = app.handleSearch()
-				cmds = append(cmds, cmd)
-
-				return app, tea.Batch(cmds...)
-			}
 		}
-	case tea.WindowSizeMsg:
-		h, v := appStyle.GetFrameSize()
-		app.resultsList.SetSize(msg.Width-h, msg.Height-v)
-		return app, nil
-
-	case searchResultMsg:
-		cmd := app.resultsList.SetItems(msg)
-		return app, cmd
 	}
 
-	// Update the components
-	app.resultsList, cmd = app.resultsList.Update(msg)
-	cmds = append(cmds, cmd)
-
-	return app, tea.Batch(cmds...)
-}
-
-func (app app) handleSearch() tea.Cmd {
-	return tea.Tick(time.Millisecond*300, func(t time.Time) tea.Msg {
-		app.state.ApiState.Status = models.Loading
-		characters, err := models.FetchCharacters(app.searchInput.Value())
+	switch app.step {
+	case models.Searching:
+		cmd, err := charmutils.UpdateTypedModel(&app.searchModel, msg)
 		if err != nil {
-			app.state.ApiState.Status = models.Error
-			app.state.ApiState.Error = err
-			return err
+			panic(err)
 		}
+		return app, cmd
 
-		return searchResultMsg(characters)
-	})
+	case models.Downloading:
+		cmd, err := charmutils.UpdateTypedModel(&app.downloadModel, msg)
+		if err != nil {
+			panic(err)
+		}
+		return app, cmd
+	}
+	return app, nil
 }
 
 func (app app) View() string {
-	return fmt.Sprintf(
-		"%s\n%s",
-		app.searchInput.View(),
-		app.resultsList.View(),
-	)
+	switch app.step {
+	case models.Searching:
+		return app.searchModel.View()
+
+	case models.Downloading:
+		return app.downloadModel.View()
+
+	default:
+		return "ERROR"
+	}
 }
 
 // var searchBar, content string
@@ -110,28 +92,10 @@ func (app app) View() string {
 // 	return fmt.Sprintf("Something bad happened")
 // }
 
-type app struct {
-	state       models.State
-	searchInput textinput.Model
-	resultsList list.Model
-}
-
 func main() {
-	searchInput := textinput.New()
-	searchInput.Prompt = "Search: "
-	searchInput.Placeholder = "Type to search..."
-	searchInput.Focus()
-
-	resultsList := list.New(make([]list.Item, 0), list.NewDefaultDelegate(), 0, 0)
-	resultsList.Title = "Results"
-	resultsList.SetShowPagination(false)
-
 	app := app{
-		state: models.State{
-			Step: models.Searching,
-		},
-		searchInput: searchInput,
-		resultsList: resultsList,
+		step:        models.Searching,
+		searchModel: views.NewSearchModel(),
 	}
 
 	if _, err := tea.NewProgram(app, tea.WithAltScreen()).Run(); err != nil {
